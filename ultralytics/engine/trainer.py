@@ -89,14 +89,27 @@ class SalUnAccumulator:
             self.scores[name] += (p.data * p.grad).abs()
 
     @torch.no_grad()
-    def build_mask(self, keep_ratio=0.5):
-        # concat all scores
+    def build_mask(self, keep_ratio=0.2):
+    
+        # 🔥 Tính tổng số phần tử
+        total_params = sum(v.numel() for v in self.scores.values())
+        k = int(total_params * keep_ratio)
+    
+        if k == 0:
+            raise ValueError("keep_ratio too small, no params selected.")
+    
+        # 🔥 Gom lại nhưng KHÔNG dùng quantile
         all_scores = torch.cat([v.flatten() for v in self.scores.values()])
-        threshold = torch.quantile(all_scores, 1 - keep_ratio)
-
+    
+        # 🔥 Lấy top-k trực tiếp
+        topk_values, _ = torch.topk(all_scores, k)
+    
+        threshold = topk_values.min()
+    
         mask = {}
         for name, v in self.scores.items():
             mask[name] = (v >= threshold).float()
+    
         return mask
         
 class BaseTrainer:
@@ -406,7 +419,7 @@ class BaseTrainer:
     
         if salun_mode:
             LOGGER.info("🔥 Running SalUn MASK GENERATION MODE")
-            salun = SalUnAccumulator(self.model, restrict_head=True)
+            salun = SalUnAccumulator(self.model, restrict_head=False)
         nb = len(self.train_loader)  # number of batches
         nw = max(round(self.args.warmup_epochs * nb), 100) if self.args.warmup_epochs > 0 else -1  # warmup iterations
         last_opt_step = -1
@@ -463,32 +476,38 @@ class BaseTrainer:
                 # Forward
                 with autocast(self.amp):
                     batch = self.preprocess_batch(batch)
+                
+                    # 🔥 Filter only forget_class targets
+                    cls_mask = batch["cls"].squeeze(-1) == forget_class
+                
+                    # Nếu batch không có class cần forget → skip
+                    if cls_mask.sum() == 0:
+                        self.model.zero_grad(set_to_none=True)
+                        continue
+                
+                    # Clone batch để không phá original batch
+                    salun_batch = {
+                        "img": batch["img"],
+                        "cls": batch["cls"][cls_mask],
+                        "bboxes": batch["bboxes"][cls_mask],
+                        "batch_idx": batch["batch_idx"][cls_mask],
+                    }
+                
+                    # Forward + loss
                     if self.args.compile:
-                        # Decouple inference and loss calculations for improved compile performance
-                        preds = self.model(batch["img"])
-                        loss, self.loss_items = unwrap_model(self.model).loss(batch, preds)
+                        preds = self.model(salun_batch["img"])
+                        loss, _ = unwrap_model(self.model).loss(salun_batch, preds)
                     else:
-                        loss, self.loss_items = self.model(batch)
+                        loss, _ = self.model(salun_batch)
+                
                     self.loss = loss.sum()
+                
                     if RANK != -1:
                         self.loss *= self.world_size
-                    self.tloss = self.loss_items if self.tloss is None else (self.tloss * i + self.loss_items) / (i + 1)
 
                 # Backward
                 self.scaler.scale(self.loss).backward()
-                # if ni - last_opt_step >= self.accumulate:
-                #     self.optimizer_step()
-                #     last_opt_step = ni
-
-                #     # Timed stopping
-                #     if self.args.time:
-                #         self.stop = (time.time() - self.train_time_start) > (self.args.time * 3600)
-                #         if RANK != -1:  # if DDP training
-                #             broadcast_list = [self.stop if RANK == 0 else None]
-                #             dist.broadcast_object_list(broadcast_list, 0)  # broadcast 'stop' to all ranks
-                #             self.stop = broadcast_list[0]
-                #         if self.stop:  # training time exceeded
-                #             break
+                self.scaler.unscale_(self.optimizer)
                 if salun_mode:
                     salun.accumulate()
             
@@ -506,7 +525,7 @@ class BaseTrainer:
                         LOGGER.info(f"💾 SalUn mask saved to {save_path}")
                         return
                 # Log
-                if RANK in {-1, 0}:
+                if RANK in {-1, 0} and self.tloss is not None:
                     loss_length = self.tloss.shape[0] if len(self.tloss.shape) else 1
                     pbar.set_description(
                         ("%11s" * 2 + "%11.4g" * (2 + loss_length))
