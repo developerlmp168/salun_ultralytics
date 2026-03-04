@@ -64,7 +64,7 @@ from ultralytics.utils.torch_utils import (
 import torch
 
 class SalUnAccumulator:
-    def __init__(self, model, restrict_head=True):
+    def __init__(self, model, restrict_head=False):
         self.model = model
         self.restrict_head = restrict_head
         self.scores = {}
