@@ -89,7 +89,7 @@ class SalUnAccumulator:
             self.scores[name] += (p.data * p.grad).abs()
 
     @torch.no_grad()
-    def build_mask(self, keep_ratio=0.2):
+    def build_mask(self, keep_ratio=0.5):
     
         # 🔥 Tính tổng số phần tử
         total_params = sum(v.numel() for v in self.scores.values())
