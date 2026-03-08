@@ -499,7 +499,8 @@ class BaseTrainer:
                         preds = self.model(salun_batch["img"])
                         loss, _ = unwrap_model(self.model).loss(preds,salun_batch,forget_class)
                     else:
-                        loss, _ = self.model(salun_batch)
+                       
+                        loss, _ = self.model(salun_batch,forget_class=forget_class)
                 
                     self.loss = loss.sum()
                 
