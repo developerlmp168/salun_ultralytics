@@ -412,10 +412,9 @@ class BaseTrainer:
         if self.world_size > 1:
             self._setup_ddp()
         self._setup_train()
-        salun_mode = True
-        forget_class = 5
-        salun_batches = 280
-        keep_ratio = 0.5
+        forget_class = self.args.forget_class
+        salun_batches = self.args.salun_batches
+        keep_ratio = self.args.keep_ratio
     
         if salun_mode:
             LOGGER.info("🔥 Running SalUn MASK GENERATION MODE")
@@ -508,22 +507,22 @@ class BaseTrainer:
                 # Backward
                 self.scaler.scale(self.loss).backward()
                 self.scaler.unscale_(self.optimizer)
-                if salun_mode:
-                    salun.accumulate()
-            
-                    # clear grads – cực kỳ quan trọng
-                    self.model.zero_grad(set_to_none=True)
-            
-                    if i + 1 >= salun_batches:
-                        LOGGER.info(f"✅ Collected gradients from {salun_batches} batches")
-            
-                        mask = salun.build_mask(keep_ratio)
-            
-                        save_path = self.save_dir / f"salun_mask_cls{forget_class}.pt"
-                        torch.save(mask, save_path)
-            
-                        LOGGER.info(f"💾 SalUn mask saved to {save_path}")
-                        return
+                
+                salun.accumulate()
+        
+                # clear grads – cực kỳ quan trọng
+                self.model.zero_grad(set_to_none=True)
+        
+                if i + 1 >= salun_batches:
+                    LOGGER.info(f"✅ Collected gradients from {salun_batches} batches")
+        
+                    mask = salun.build_mask(keep_ratio)
+        
+                    save_path = self.save_dir / f"salun_mask_cls{forget_class}.pt"
+                    torch.save(mask, save_path)
+        
+                    LOGGER.info(f"💾 SalUn mask saved to {save_path}")
+                    return
                 # Log
                 if RANK in {-1, 0} and self.tloss is not None:
                     loss_length = self.tloss.shape[0] if len(self.tloss.shape) else 1
