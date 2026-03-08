@@ -415,10 +415,12 @@ class BaseTrainer:
         forget_class = self.args.forget_class
         salun_batches = self.args.salun_batches
         keep_ratio = self.args.keep_ratio
-    
-        if salun_mode:
-            LOGGER.info("🔥 Running SalUn MASK GENERATION MODE")
-            salun = SalUnAccumulator(self.model, restrict_head=False)
+        print("forget_class",forget_class)
+        print("salun_batches",salun_batches)
+        print("keep_ratio",keep_ratio)
+        
+        LOGGER.info("🔥 Running SalUn MASK GENERATION MODE")
+        salun = SalUnAccumulator(self.model, restrict_head=False)
         nb = len(self.train_loader)  # number of batches
         nw = max(round(self.args.warmup_epochs * nb), 100) if self.args.warmup_epochs > 0 else -1  # warmup iterations
         last_opt_step = -1
