@@ -251,7 +251,7 @@ class v8DetectionLoss:
             YOLOv8 loss for SalUn-style unlearning
             Only compute loss for a specific class (default: class 5)
             """
-    
+            print('forget_class',forget_class)
             device = self.device
             loss = torch.zeros(3, device=device)  # box, cls, dfl
     
